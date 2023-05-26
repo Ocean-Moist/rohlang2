@@ -44,6 +44,9 @@ fn lexer(input: &str) -> Vec<Tokens> {
             ' ' => {
                 chars.next(); // Ignore whitespace
             }
+            '\n' => {
+                chars.next(); // Ignore newlines
+            }
             '(' => {
                 tokens.push(Tokens::OpenParen);
                 chars.next();
@@ -263,7 +266,6 @@ fn main() {
     let args = std::env::args().collect::<Vec<String>>();
     // open .roh file and read it into a string
     let input = std::fs::read_to_string(&args[1]).expect("Failed to read file");
-    
     let tokens = lexer(&input); // Tokenize input string
     let ast = parser(&tokens); // Parse tokens into AST
     println!("{:?}", eval(ast))
