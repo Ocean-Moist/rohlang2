@@ -1,21 +1,26 @@
+{-# LANGUAGE BlockArguments #-}
 import Text.Read (readMaybe)
 import Data.Char
-data Combinators = S | K | I
-
-data Value where
-  Empty :: Value
-  Int :: Int -> Value
-  Values :: (Value, Value) -> Value
+data Combinators = S | K | I deriving (Show)
 
 -- + - * / 6 min(int,int) max(int,int) & | ! % = !=
 data Ops = Add | Sub | Mul | Div | Pow | Min | Max | And | Or | Not | Mod | Equals | NotEquals
+  deriving (Show)
 
-data Tokens where 
-  Value :: Value -> Tokens
+data Tokens where
   Op :: Ops -> Tokens
   Combinator :: Combinators -> Tokens
   OpenParen :: Tokens
   CloseParen :: Tokens
+  deriving (Show)
+
+
+
+data AST where
+  Oper :: Ops -> AST -> AST -> AST
+  Combi :: Combinators -> AST -> AST -> AST
+  Input :: AST
+  deriving (Show)
 
 lexer :: String -> [Tokens]
 lexer "" = []
@@ -24,16 +29,15 @@ lexer (c:cs)
   | c == '(' = OpenParen : lexer cs
   | c == ')' = CloseParen : lexer cs
   | c `elem` "+-*/^&|!%=" = Op (parseOp [c]) : lexer cs
+  | c == 'm' && cs `startsWith` "ax" = Op Max : lexer (drop 2 cs)
+  | c == 'm' && cs `startsWith` "in" = Op Min : lexer (drop 2 cs)
   | c `elem` "<>" = case cs of
                       ('=':rest) -> Op (parseOp (c:"=")) : lexer rest
                       _ -> error "Invalid operator"
   | c == 'm' && cs `startsWith` "in" = Op Mod : lexer (drop 2 cs)
-  | c == 'S' = Combinator S : lexer cs
-  | c == 'K' = Combinator K : lexer cs
-  | c == 'I' = Combinator I : lexer cs
-  | isDigit c = case readMaybe (c : takeWhile isDigit cs) of
-                  Just n -> Value (Int n) : lexer (dropWhile isDigit cs)
-                  Nothing -> error "Invalid number"
+  | c == 's' = Combinator S : lexer cs
+  | c == 'k' = Combinator K : lexer cs
+  | c == 'i' = Combinator I : lexer cs
   | otherwise = error "Invalid character"
 
 -- Helper function to check if a string starts with a specific substring
@@ -53,5 +57,33 @@ parseOp "!" = Not
 parseOp "%" = Mod
 parseOp "=" = Equals
 parseOp "!=" = NotEquals
+parseOp "min" = Min
+parseOp "max" = Max
+
 parseOp op = error $ "Invalid operator: " ++ op
+
+prettyPrint :: AST -> String
+prettyPrint ast = prettyPrint' ast 0
+
+-- Helper function for pretty printing with indentation
+prettyPrint' :: AST -> Int -> String
+prettyPrint' Input indent = replicate indent ' ' ++ "Input\n"
+prettyPrint' (Oper op left right) indent =
+  replicate indent ' ' ++ show op ++ "\n" ++
+  prettyPrint' left (indent + 2) ++
+  prettyPrint' right (indent + 2)
+prettyPrint' (Combi comb left right) indent =
+  replicate indent ' ' ++ show comb ++ "\n" ++
+  prettyPrint' left (indent + 2) ++
+  prettyPrint' right (indent + 2)
+
+
+main :: IO ()
+main = do
+  putStrLn "Enter an expression:"
+  input <- getLine
+  let tokens = lexer input
+  print tokens
+  -- let ast = parser tokens
+  -- putStr (prettyPrint ast)
 
