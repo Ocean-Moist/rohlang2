@@ -1,10 +1,4 @@
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-enum Combinators {
-    S,
-    K,
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 enum Ops {
     Add,
     Sub,
@@ -17,21 +11,19 @@ enum Ops {
     Or,
     Not,
     Mod,
-    Eq
+    Eq,
 }
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq)]
 enum Tokens {
-    Combinator(Combinators),
     Op(Ops),
-    OpenParen,
-    CloseParen,
-} 
+    S(Box<Tokens>, Box<Tokens>, Box<Tokens>),
+    K(Box<Tokens>, Box<Tokens>),
+}
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 enum AST {
     Operator(Ops, Box<AST>, Box<AST>),
-    Combinator(Combinators, Box<AST>, Box<AST>),
     Input,
 }
 
@@ -47,16 +39,8 @@ fn lexer(input: &str) -> Vec<Tokens> {
             '\n' => {
                 chars.next(); // Ignore newlines
             }
-            '(' => {
-                tokens.push(Tokens::OpenParen);
-                chars.next();
-            }
-            ')' => {
-                tokens.push(Tokens::CloseParen);
-                chars.next();
-            }
             '+' | '-' | '*' | '/' | '^' | '&' | '|' | '!' | '%' | '=' => {
-                tokens.push(Tokens::Op(parse_op(c)));
+                tokens.push(Tokens::Op(lex_op(c)));
                 chars.next();
             }
             'm' => {
@@ -86,12 +70,17 @@ fn lexer(input: &str) -> Vec<Tokens> {
                 }
             }
             's' => {
-                tokens.push(Tokens::Combinator(Combinators::S));
                 chars.next();
+                let s1 = Box::new(lexer_single(&mut chars));
+                let s2 = Box::new(lexer_single(&mut chars));
+                let s3 = Box::new(lexer_single(&mut chars));
+                tokens.push(Tokens::S(s1, s2, s3));
             }
             'k' => {
-                tokens.push(Tokens::Combinator(Combinators::K));
                 chars.next();
+                let k1 = Box::new(lexer_single(&mut chars));
+                let k2 = Box::new(lexer_single(&mut chars));
+                tokens.push(Tokens::K(k1, k2));
             }
             _ => panic!("Invalid character"),
         }
@@ -100,7 +89,50 @@ fn lexer(input: &str) -> Vec<Tokens> {
     tokens
 }
 
-fn parse_op(c: char) -> Ops {
+fn lexer_single<I>(iter: &mut I) -> Tokens
+where
+    I: Iterator<Item = char>,
+{
+    if let Some(c) = iter.next() {
+        match c {
+            ' ' | '\n' => lexer_single(iter),
+            '+' | '-' | '*' | '/' | '^' | '&' | '|' | '!' | '%' | '=' => Tokens::Op(lex_op(c)),
+            'm' => match iter.next() {
+                Some('i') => {
+                    if let Some('n') = iter.next() {
+                        Tokens::Op(Ops::Min)
+                    } else {
+                        panic!("Invalid character")
+                    }
+                }
+                Some('a') => {
+                    if let Some('x') = iter.next() {
+                        Tokens::Op(Ops::Max)
+                    } else {
+                        panic!("Invalid character")
+                    }
+                }
+                _ => panic!("Invalid character"),
+            },
+            's' => {
+                let s1 = Box::new(lexer_single(iter));
+                let s2 = Box::new(lexer_single(iter));
+                let s3 = Box::new(lexer_single(iter));
+                Tokens::S(s1, s2, s3)
+            }
+            'k' => {
+                let k1 = Box::new(lexer_single(iter));
+                let k2 = Box::new(lexer_single(iter));
+                Tokens::K(k1, k2)
+            }
+            _ => panic!("Invalid character"),
+        }
+    } else {
+        panic!("Invalid character")
+    }
+}
+
+fn lex_op(c: char) -> Ops {
     match c {
         '+' => Ops::Add,
         '-' => Ops::Sub,
@@ -116,66 +148,75 @@ fn parse_op(c: char) -> Ops {
     }
 }
 
-    fn parser(tokens: &[Tokens]) -> AST {
-        let mut ast: AST = AST::Input; // Initially set to Input to indicate an empty expression
-        let mut paren_start: Option<usize> = None;
-    
-        for (i, token) in tokens.iter().enumerate() {
-            match token {
-                Tokens::OpenParen => {
-                    if paren_start.is_none() {
-                        paren_start = Some(i);
-                    }
-                }
-                Tokens::CloseParen => {
-                    if let Some(start) = paren_start {
-                        let paren_tokens = &tokens[start + 1..i]; // Extract tokens inside parentheses
-                        let paren_ast = parser(paren_tokens); // Parse tokens inside parentheses
-                        ast = replace_input_node(ast, paren_ast); // Replace Input node with the parsed expression
-                        paren_start = None;
-                    } else {
-                        panic!("Invalid closing parenthesis");
-                    }
-                }
-                Tokens::Combinator(combinator) => {
-                    ast = replace_input_node(ast, generate_combinator_structure(combinator.clone()));
-                }
-                Tokens::Op(op) => {
-                    ast = replace_input_node(ast, generate_op_node_structure(op.clone()));
-                }
-            }
+fn unbox_tokens(tokens: &Box<Tokens>) -> Vec<Tokens> {
+    let mut result: Vec<Tokens> = Vec::new();
+
+    match &**tokens {
+        Tokens::Op(op) => {
+            result.push(Tokens::Op(op.clone()));
         }
-    
-        if paren_start.is_some() {
-            panic!("Unclosed parenthesis");
+        Tokens::S(ref t1, ref t2, ref t3) => {
+            result.extend_from_slice(&unbox_tokens(t1));
+            result.extend_from_slice(&unbox_tokens(t2));
+            result.extend_from_slice(&unbox_tokens(t3));
         }
-    
-        ast
+        Tokens::K(ref t1, ref t2) => {
+            result.extend_from_slice(&unbox_tokens(t1));
+            result.extend_from_slice(&unbox_tokens(t2));
+        }
     }
 
-fn replace_input_node(ast: AST, input: AST) -> AST {
-    match ast {
-        AST::Operator(op, left, right) => {
-            match *left {
-                AST::Input => AST::Operator(op, Box::new(input), right),
-                _ => AST::Operator(op, Box::new(replace_input_node(*left, input)), right),
-            }
-        }
-        AST::Combinator(combinator, left, right) => {
-            match *left {
-                AST::Input => AST::Combinator(combinator, Box::new(input), right),
-                _ => AST::Combinator(combinator, Box::new(replace_input_node(*left, input)), right),
-            }
-        }
-        AST::Input => input,
-    }
+    result
 }
 
-fn generate_combinator_structure(combinator: Combinators) -> AST {
-    match combinator {
-        Combinators::S => AST::Combinator(Combinators::S, Box::new(AST::Input), Box::new(AST::Input)),
-        Combinators::K => AST::Combinator(Combinators::K, Box::new(AST::Input), Box::new(AST::Input)),
+fn parser(tokens: &Vec<Tokens>) -> AST {
+    let mut ast: AST = AST::Input; // Initially set to Input to indicate an empty expression
+
+    for (_, token) in tokens.iter().enumerate() {
+        match token {
+            Tokens::S(x, y, z) => {
+                let xz = replace_input_node(parser(&unbox_tokens(x)), parser(&unbox_tokens(z)));
+                let yz = replace_input_node(parser(&unbox_tokens(y)), parser(&unbox_tokens(z)));
+                println!("xz: {:?}, yz: {:?}", xz, yz);
+                ast = replace_input_node(xz, yz);
+            }
+            Tokens::K(x, _) => {
+                ast = replace_input_node(ast, parser(&unbox_tokens(x)));
+            }
+            Tokens::Op(op) => {
+                ast = replace_input_node(ast, generate_op_node_structure(op.clone()));
+            }
+        }
     }
+
+    ast
+}
+
+use std::collections::VecDeque;
+
+fn replace_input_node(ast: AST, input: AST) -> AST {
+    let mut queue = VecDeque::new();
+    queue.push_back(ast.clone());
+
+    while let Some(node) = queue.pop_front() {
+        match node {
+            AST::Operator(op, left, right) => {
+                if *left == AST::Input {
+                    return AST::Operator(op, Box::new(input.clone()), right);
+                } else if *right == AST::Input {
+                    return AST::Operator(op, left, Box::new(input.clone()));
+                } else {
+                    queue.push_back(*left);
+                    queue.push_back(*right);
+                }
+            }
+            AST::Input => {
+                return input.clone();
+            }
+        }
+    }
+
+    ast
 }
 
 fn generate_op_node_structure(op: Ops) -> AST {
@@ -239,19 +280,13 @@ fn eval(ast: AST) -> i32 {
                 }
             }
         }
-        AST::Combinator(combinator, left, right) => {
-            let left_value = eval(*left);
-            let right_value = eval(*right);
-            match combinator {
-                Combinators::S => right_value * left_value + right_value,
-                Combinators::K => left_value,
-            }
-        }
         AST::Input => {
             // Prompt the user for input until a valid integer is entered
             loop {
                 let mut input = String::new();
-                std::io::stdin().read_line(&mut input).expect("Failed to read input");
+                std::io::stdin()
+                    .read_line(&mut input)
+                    .expect("Failed to read input");
                 match input.trim().parse::<i32>() {
                     Ok(value) => break value,
                     Err(_) => println!("Invalid input! Please enter a valid integer."),
@@ -260,7 +295,6 @@ fn eval(ast: AST) -> i32 {
         }
     }
 }
-
 
 fn main() {
     let args = std::env::args().collect::<Vec<String>>();
