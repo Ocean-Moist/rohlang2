@@ -34,7 +34,6 @@ executable frontend
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
-    exposed-modules:   Main
     autogen-modules:   Proto.AST Proto.AST_Fields 
     other-modules:     Proto.AST Proto.AST_Fields
     build-depends:    base ^>=4.16.4.0, proto-lens-runtime
