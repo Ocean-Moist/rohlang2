@@ -1,0 +1,15 @@
+min
+/   \
++   |
+/   \   |
+max   |   |
+/   \   |   |
++   |   |   |
+/   \   |   |   |
+min   |   |   |   |
+/   \   |   |   |   |
+max   |   |   |   |   |
+/   \   |   |   |   |   |
++   |   |   |   |   |   |
+/   \   |   |   |   |   |   |
+Input   ||   Input   ||   Input   ||   Input   ||   Input   ||   Input   ||   Input   ||   Input
