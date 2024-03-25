@@ -1,3 +1,9 @@
+use std::collections::VecDeque;
+use std::fmt;
+use std::iter::Peekable;
+use std::str::FromStr;
+use crate::LexerError::InvalidKeyword;
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 enum Ops {
     Add,
@@ -30,138 +36,176 @@ enum AST {
     Dup,
     Val(i32),
 }
+fn display_tree(ast: &AST, prefix: &str, is_last: bool) {
+    let connector = if is_last { "└── " } else { "├── " };
+    let mut prefix_child = String::from(prefix);
+    if is_last {
+        prefix_child.push_str("    ");
+    } else {
+        prefix_child.push_str("│   ");
+    }
 
-fn lexer(input: &str) -> Vec<Tokens> {
+    match ast {
+        AST::Operator(op, left, right) => {
+            println!("{}{:?}", prefix, op);
+            display_tree(left, &prefix_child, false);
+            display_tree(right, &prefix_child, true);
+        }
+        AST::Input => println!("{}Input", connector),
+        AST::Dup => println!("{}Dup", connector),
+        AST::Val(val) => println!("{}Val({})", connector, val),
+    }
+}
+
+#[derive(Debug)]
+enum LexerError {
+    InvalidCharacter(char),
+    InvalidNumber(String),
+    InvalidKeyword(String),
+}
+
+impl fmt::Display for LexerError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            LexerError::InvalidCharacter(c) => write!(f, "Invalid character: {}", c),
+            LexerError::InvalidNumber(s) => write!(f, "Invalid number: {}", s),
+            InvalidKeyword(s) => write!(f, "Invalid keyword: {}", s)
+        }
+    }
+}
+
+impl FromStr for Ops {
+    type Err = LexerError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "min" => Ok(Ops::Min),
+            "max" => Ok(Ops::Max),
+            _ => Err(InvalidKeyword(s.to_string()))
+        }
+    }
+}
+
+
+fn lexer(input: &str) -> Result<Vec<Tokens>, LexerError> {
     let mut tokens: Vec<Tokens> = Vec::new();
     let mut chars = input.chars().peekable();
 
     while let Some(&c) = chars.peek() {
         match c {
-            ' ' => {
-                chars.next(); // Ignore whitespace
-            }
-            '\n' => {
-                chars.next(); // Ignore newlines
+            ' ' | '\n' => {
+                chars.next(); // Ignore whitespace and newlines
             }
             '+' | '-' | '*' | '/' | '^' | '&' | '|' | '!' | '%' | '=' => {
                 tokens.push(Tokens::Op(lex_op(c)));
                 chars.next();
             }
-            'm' => {
-                chars.next();
-                match chars.peek() {
-                    Some(&'i') => {
-                        chars.next();
-                        match chars.peek() {
-                            Some(&'n') => {
-                                chars.next();
-                                tokens.push(Tokens::Op(Ops::Min));
-                            }
-                            _ => panic!("Invalid character"),
-                        }
-                    }
-                    Some(&'a') => {
-                        chars.next();
-                        match chars.peek() {
-                            Some(&'x') => {
-                                chars.next();
-                                tokens.push(Tokens::Op(Ops::Max));
-                            }
-                            _ => panic!("Invalid character"),
-                        }
-                    }
-                    _ => panic!("Invalid character"),
-                }
-            }
-            's' => {
-                chars.next();
-                let s1 = Box::new(lexer_single(&mut chars));
-                let s2 = Box::new(lexer_single(&mut chars));
-                let s3 = Box::new(lexer_single(&mut chars));
-                tokens.push(Tokens::S(s1, s2, s3));
-            }
-            'k' => {
-                chars.next();
-                let k1 = Box::new(lexer_single(&mut chars));
-                let k2 = Box::new(lexer_single(&mut chars));
-                tokens.push(Tokens::K(k1, k2));
-            }
-            'd' => {
-                chars.next();
-                match chars.peek() {
-                    Some(&'u') => {
-                        chars.next();
-                        match chars.peek() {
-                            Some(&'p') => {
-                                chars.next();
-                                tokens.push(Tokens::Dup);
-                            }
-                            _ => panic!("Invalid character"),
-                        }
-                    }
-                    _ => panic!("Invalid character"),
+            'a'..='z' => {
+                let keyword = lex_keyword(&mut chars)?;
+                match keyword.as_str() {
+                    "s" => tokens.push(lex_s(&mut chars)?),
+                    "k" => tokens.push(lex_k(&mut chars)?),
+                    "dup" => tokens.push(Tokens::Dup),
+                    _ => tokens.push(Tokens::Op(Ops::from_str(&keyword)?)),
                 }
             }
             '0'..='9' => {
-                let mut number = String::new();
-                while let Some(&c) = chars.peek() {
-                    if c.is_ascii_digit() {
-                        chars.next();
-                        number.push(c);
-                    } else {
-                        break;
-                    }
-                }
-                let parsed_number: i32 = number.parse().unwrap();
-                tokens.push(Tokens::Val(parsed_number));
+                tokens.push(lex_number(&mut chars)?);
             }
-            _ => panic!("Invalid character"),
+            _ => return Err(LexerError::InvalidCharacter(c)),
         }
     }
-    tokens
+    Ok(tokens)
 }
 
-fn lexer_single<I>(iter: &mut I) -> Tokens
-where
-    I: Iterator<Item = char>,
+fn lexer_single<I>(iter: &mut Peekable<I>) -> Result<Tokens, LexerError>
+    where
+        I: Iterator<Item = char>,
 {
-    if let Some(c) = iter.next() {
-        match c {
-            ' ' | '\n' => lexer_single(iter),
-            '+' | '-' | '*' | '/' | '^' | '&' | '|' | '!' | '%' | '=' => Tokens::Op(lex_op(c)),
-            'm' => match iter.next() {
-                Some('i') => {
-                    if let Some('n') = iter.next() {
-                        Tokens::Op(Ops::Min)
-                    } else {
-                        panic!("Invalid character")
-                    }
-                }
-                Some('a') => {
-                    if let Some('x') = iter.next() {
-                        Tokens::Op(Ops::Max)
-                    } else {
-                        panic!("Invalid character")
-                    }
-                }
-                _ => panic!("Invalid character"),
-            },
-            's' => {
-                let s1 = Box::new(lexer_single(iter));
-                let s2 = Box::new(lexer_single(iter));
-                let s3 = Box::new(lexer_single(iter));
-                Tokens::S(s1, s2, s3)
+    match iter.peek() {
+        Some(&c) if c.is_ascii_alphabetic() => {
+            let keyword = lex_keyword(iter)?;
+            match keyword.as_str() {
+                "s" => Ok(lex_s(iter)?),
+                "k" => Ok(lex_k(iter)?),
+                "dup" => Ok(Tokens::Dup),
+                _ => {
+                    Err(InvalidKeyword(keyword))
+                },
             }
-            'k' => {
-                let k1 = Box::new(lexer_single(iter));
-                let k2 = Box::new(lexer_single(iter));
-                Tokens::K(k1, k2)
-            }
-            _ => panic!("Invalid character"),
         }
-    } else {
-        panic!("Invalid character")
+        Some(&c) if is_operator(c)  => Ok(Tokens::Op(lex_op(c))),
+        Some(&c) => Err(LexerError::InvalidCharacter(c)),
+        None => Err(InvalidKeyword("".to_string())),
     }
+}
+
+fn is_operator(op: char) -> bool {
+    match op {
+        '+' | '-' | '*' | '/' | '^' | '&' | '|' | '!' | '%' | '=' => true,
+        _ => false,
+    }
+}
+
+fn lex_keyword<I>(iter: &mut Peekable<I>) -> Result<String, LexerError>
+    where
+        I: Iterator<Item = char>,
+{
+    let mut keyword = String::new();
+    while let Some(&c) = iter.peek() {
+        if c.is_ascii_alphabetic() {
+            iter.next();
+            keyword.push(c);
+        } else {
+            break;
+        }
+    }
+    if keyword.is_empty() {
+        Err(InvalidKeyword(keyword))
+    } else {
+        Ok(keyword)
+    }
+}
+
+fn lex_s<I>(iter: &mut Peekable<I>) -> Result<Tokens, LexerError>
+    where
+        I: Iterator<Item = char>,
+{
+    let s1 = lexer_single(iter)?;
+    iter.next(); 
+    let s2 = lexer_single(iter)?;
+    iter.next();
+    let s3 = lexer_single(iter)?;
+    iter.next();
+    Ok(Tokens::S(Box::new(s1), Box::new(s2), Box::new(s3)))
+}
+
+fn lex_k<I>(iter: &mut Peekable<I>) -> Result<Tokens, LexerError>
+    where
+        I: Iterator<Item = char>,
+{
+    let k1 = lexer_single(iter)?;
+    iter.next();
+    let k2 = lexer_single(iter)?;
+    iter.next();
+    Ok(Tokens::K(Box::new(k1), Box::new(k2)))
+}
+
+fn lex_number<I>(iter: &mut Peekable<I>) -> Result<Tokens, LexerError>
+    where
+        I: Iterator<Item = char>,
+{
+    let mut number = String::new();
+    while let Some(&c) = iter.peek() {
+        if c.is_ascii_digit() {
+            iter.next();
+            number.push(c);
+        } else {
+            break;
+        }
+    }
+    let parsed_number: i32 = number.parse().map_err(|_| LexerError::InvalidNumber(number))?;
+    Ok(Tokens::Val(parsed_number))
 }
 
 fn lex_op(c: char) -> Ops {
@@ -215,10 +259,12 @@ fn parser(tokens: &Vec<Tokens>) -> AST {
             Tokens::S(x, y, z) => {
                 let xz = replace_input_node(parser(&unbox_tokens(x)), parser(&unbox_tokens(z)));
                 let yz = replace_input_node(parser(&unbox_tokens(y)), parser(&unbox_tokens(z)));
+                println!("x: {:?}, y: {:?}, z: {:?}", x, y, z);
                 println!("xz: {:?}, yz: {:?}", xz, yz);
                 ast = replace_input_node(xz, yz);
             }
-            Tokens::K(x, _) => {
+            Tokens::K(x, y) => {
+                println!("x: {:?} y: {:?}", x, y);
                 ast = replace_input_node(ast, parser(&unbox_tokens(x)));
             }
             Tokens::Op(op) => {
@@ -267,7 +313,7 @@ fn replace_next_input_node_with_dupe(ast: AST) -> AST {
     ast
 }
 
-use std::collections::VecDeque;
+
 
 fn replace_input_node(ast: AST, input: AST) -> AST {
     let mut queue = VecDeque::new();
@@ -364,23 +410,47 @@ fn eval(ast: AST, last: &mut Option<i32>) -> i32 {
 
 fn main() {
     let args = std::env::args().collect::<Vec<String>>();
+    if args.len() < 2 {
+        println!("Usage: roh <file.roh> or roh repl");
+        return;
+    }
     if args[1] == "repl" {
         repl();
     }
     // open .roh file and read it into a string
     let input = std::fs::read_to_string(&args[1]).expect("Failed to read file");
     let tokens = lexer(&input); // Tokenize input string
-    let ast = parser(&tokens); // Parse tokens into AST
+    let tokens = match tokens {
+        Ok(tokens) => tokens,
+        Err(e) => {
+            println!("LexerError: {}", e);
+            return;
+        }
+    };
+    let ast = parser(&tokens); // Parse tokens into an AST
+    println!("ast: {:?}", ast); // Display the AST (for debugging purposes
+    display_tree(&ast, "", false); // Display the AST (for debugging purposes
     println!("{:?}", eval(ast, &mut None))
 }
+// xz: Operator(Sub, Operator(Sub, Input, Input), Input), yz: Operator(Sub, Operator(Sub, Input, Input), Input)
+// xz: Operator(Sub, Operator(Mul, Input, Input), Input), yz: Operator(Add, Operator(Mul, Input, Input), Input)
+// ast: Operator(Sub, Operator(Mul, Input, Input), Operator(Add, Operator(Mul, Input, Input), Input))
+// 1 - 
 
 fn repl() -> () {
     loop {
         let std = std::io::stdin();
         let mut input: String = "".to_string();
-        std.read_line(&mut input);
+        std.read_line(&mut input).unwrap();
 
         let tokens = lexer(&input);
+        let tokens = match tokens {
+            Ok(tokens) => tokens,
+            Err(e) => {
+                println!("LexerError: {}", e);
+                continue;
+            }
+        };
         let ast = parser(&tokens);
         println!("tokens: {:?}", tokens);
         println!("ast: {:?}", ast);
